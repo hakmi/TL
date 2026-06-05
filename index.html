@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plateforme d'Habilitation SCADA</title>
+    
+    <!-- Tailwind CSS pour le design -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM (Bibliothèques de base) -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel (Pour compiler le code JSX directement dans le navigateur) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-gray-50 text-gray-900 font-sans min-h-screen">
+    
+    <div id="root" class="min-h-screen"></div>
+
+    <script type="text/babel">
+        // Importation des outils React
+        const { useState, useEffect, useRef } = React;
+
+        // --- ICÔNES (SVG Intégrés pour garantir l'indépendance du fichier) ---
+        const ShieldAlert = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>;
+        const CheckCircle = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>;
+        const XCircle = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>;
+        const Upload = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>;
+        const Play = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>;
+        const BookOpen = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>;
+        const RefreshCw = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>;
+        const Award = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg>;
+        const AlertTriangle = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
+        const Database = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>;
+
+        // --- MOTEUR DE PARSING TEXTE -> JSON (Le script regex) ---
+        const parseQCMText = (text) => {
+          const qDatabase = [];
+          const blocks = text.split(/(?=Q\d+\.)/g);
+
+          blocks.forEach(bloc => {
+            bloc = bloc.trim();
+            if (!bloc.startsWith('Q')) return;
+
+            const qMatch = bloc.match(/^Q(\d+)\.\s*(.*?)(?=A\))/s);
+            if (!qMatch) return;
+            
+            const id = parseInt(qMatch[1]);
+            const questionText = qMatch[2].trim();
+
+            const options = [];
+            const letters = ['A', 'B', 'C', 'D'];
+            for (let i = 0; i < letters.length; i++) {
+              const letter = letters[i];
+              const nextLetter = letters[i + 1];
+              let regexStr = `${letter}\\)\\s*(.*?)(?=(?:${nextLetter}\\)|Réponse\\s*:))`;
+              if (!nextLetter) regexStr = `${letter}\\)\\s*(.*?)(?=Réponse\\s*:)`;
+              
+              const optMatch = bloc.match(new RegExp(regexStr, 's'));
+              if (optMatch) options.push({ id: letter, text: optMatch[1].trim() });
+            }
+
+            const repMatch = bloc.match(/Réponse\s*:\s*([A-D])\s*-\s*Justification\s*:\s*(.*)/s);
+            const correctAnswer = repMatch ? repMatch[1].trim() : '';
+            const justification = repMatch ? repMatch[2].trim() : '';
+
+            if(correctAnswer) {
+               qDatabase.push({ id, question: questionText, options, correctAnswer, justification });
+            }
+          });
+
+          return qDatabase;
+        };
+
+        // --- BASE DE DONNÉES BRUTE (100 Questions Intégrées) ---
+        const rawQCMData = `
+BANQUE DE DONNÉES QCM - SPÉCIALITÉ TÉLÉCOM ET TÉLÉCONDUITE
+SCADA, Réseaux Informatiques (CCNA), Fibre Optique, CPL et Cybersécurité
+Ce document contient 100 questions professionnelles avec leurs réponses et justifications pour l'évaluation des ingénieurs et techniciens Télécom & SCADA.
+
+THÈME 1 : PRINCIPES FONDAMENTAUX SCADA ET ARCHITECTURE (Q1 à Q12)
+Q1. Dans l'architecture d'un système de téléconduite, que signifie l'acronyme SCADA ?
+A) System Control and Digital Automation.
+B) Supervisory Control And Data Acquisition (Contrôle de Supervision et Acquisition de Données).
+C) Serial Communication And Direct Access.
+D) Synchronized Computer And Digital Applications.
+Réponse : B - Justification : Le système SCADA permet la supervision centralisée et le contrôle à distance des infrastructures électriques industrielles.
+Q2. Quel est le rôle principal d'un RTU (Remote Terminal Unit) dans une sous-station ?
+A) Refroidir les serveurs informatiques.
+B) Collecter les signaux physiques analogiques et numériques du poste, les convertir en données logiques et les transmettre au centre de contrôle via un protocole standard.
+C) Produire de l'électricité de secours.
+D) Acheminer les appels téléphoniques du personnel.
+Réponse : B - Justification : Le RTU fait le pont vital entre l'équipement de puissance (disjoncteurs, capteurs) et le réseau de télécommunication vers le Dispatching.
+Q3. Au niveau du Dispatching (Centre de Contrôle), que fait le MTU (Master Terminal Unit) ?
+A) Il coupe physiquement les lignes THT.
+B) Il interroge les RTU distants, consolide les bases de données en temps réel et fournit les informations aux interfaces graphiques (IHM) des opérateurs.
+C) Il sert de routeur WiFi pour le bâtiment.
+D) Il imprime les factures d'électricité.
+Réponse : B - Justification : Le MTU (ou Serveur SCADA) est le "cerveau" centralisé qui orchestre l'acquisition des données et l'envoi des commandes.
+Q4. Dans un système SCADA, qu'est-ce que le processus de "Polling" (Interrogation) ?
+A) Le cryptage des mots de passe.
+B) L'interrogation cyclique et séquentielle de chaque RTU par le serveur Maître pour vérifier s'il a de nouvelles données à transmettre.
+C) Le redémarrage forcé des serveurs.
+D) La réparation des câbles optiques.
+Réponse : B - Justification : Le polling maître-esclave gère le trafic sur les canaux de communication lents, empêchant les collisions de données.
+Q5. Quel est l'avantage du mode de communication "Report by Exception" (RBE) par rapport au Polling strict ?
+A) Il est plus facile à programmer.
+B) Le RTU envoie spontanément les données au serveur UNIQUEMENT lorsqu'une valeur change (ex: alarme, mesure hors seuil), ce qui économise massivement la bande passante.
+C) Il éteint le RTU pour économiser l'énergie.
+D) Il n'a pas besoin de réseau.
+Réponse : B - Justification : Le RBE est crucial sur les réseaux à bande passante limitée (ex: radio ou CPL) pour éviter de transmettre des valeurs redondantes.
+Q6. Qu'est-ce que la fonction SOE (Sequence Of Events / Consignation d'état) dans un RTU ?
+A) L'enregistrement audio des opérateurs.
+B) L'horodatage ultra-précis (à la milliseconde près) de chaque changement d'état numérique au niveau du RTU lui-même, stocké dans un buffer pour envoi ultérieur.
+C) Le séquençage des feux de signalisation.
+D) Une fonction de dessin de l'IHM.
+Réponse : B - Justification : Lors d'un "black-out", le Dispatching a besoin de la chronologie exacte des événements. L'horodatage à la source (RTU) via GPS garantit cette précision.
+Q7. Sur un écran d'opérateur SCADA, l'acronyme IHM (ou HMI) signifie :
+A) Interface Haute Moyenne.
+B) Interface Homme-Machine (Human-Machine Interface), soit la représentation graphique dynamique du réseau.
+C) Index Hardware Mac.
+D) Interrupteur Horodateur Magnétique.
+Réponse : B - Justification : L'IHM traduit les bits informatiques en symboles graphiques (ex: disjoncteurs rouges ou verts).
+Q8. Que signifie une architecture de serveurs SCADA configurée en "Hot-Standby" ?
+A) Un serveur travaille le jour, l'autre la nuit.
+B) Le serveur primaire traite le trafic, tandis que le secondaire est allumé, synchronise ses bases de données en temps réel et prend le relais instantanément (Failover) en cas de panne du primaire.
+C) Les serveurs partagent la charge 50/50.
+D) Les serveurs sont éteints pour ne pas surchauffer.
+Réponse : B - Justification : Cette redondance garantit la haute disponibilité (HA). Le Dispatching ne doit jamais perdre la visibilité sur le réseau.
+Q9. Pourquoi la synchronisation temporelle par GPS est-elle indispensable pour un système SCADA moderne ?
+A) Pour localiser géographiquement le poste.
+B) Pour s'assurer que tous les RTU et relais du réseau national partagent exactement la même horloge (à la milliseconde près), permettant une analyse post-incident cohérente.
+C) Pour que l'antenne radio fonctionne.
+D) Pour le pointage des employés.
+Réponse : B - Justification : Sans horloge synchronisée globalement (IRIG-B, SNTP, PTP), il est impossible de savoir quel poste a déclenché en premier lors d'un défaut en cascade.
+Q10. Un "Transducteur" de puissance branché sur un TC/TT envoie souvent son signal analogique au RTU via une boucle de courant standard. Quelle est cette norme ?
+A) 0 - 5 Volts.
+B) Boucle de courant 4 - 20 mA.
+C) 220 Volts AC.
+D) -48 Volts DC.
+Réponse : B - Justification : Le signal 4-20mA est immunisé contre les chutes de tension sur les longs câbles. 4mA représente le "Zéro" physique (permettant de détecter un fil coupé, à la différence d'un 0-20mA).
+Q11. Quelle est la différence conceptuelle entre un SCADA et un DCS (Distributed Control System) ?
+A) Aucune, c'est exactement la même chose.
+B) Le DCS est utilisé pour des processus continus localisés (ex: usine, raffinerie), tandis que le SCADA supervise des équipements très dispersés géographiquement (sous-stations, oléoducs).
+C) Le DCS est analogique, le SCADA numérique.
+D) Le SCADA ne fait que de la lecture, le DCS fait de l'écriture.
+Réponse : B - Justification : Bien que leurs technologies convergent aujourd'hui, le SCADA est axé sur la télémétrie lointaine et les réseaux étendus (WAN).
+Q12. Sur un RTU, une entrée recevant le signal d'un contact de position de disjoncteur (Ouvert/Fermé) est connectée sur une carte :
+A) AI (Analog Input).
+B) DI (Digital Input / Entrée numérique).
+C) DO (Digital Output).
+D) AO (Analog Output).
+Réponse : B - Justification : L'état Ouvert/Fermé est un signal binaire (0 ou 1) lu par les modules d'entrées numériques (DI) du RTU.
+
+THÈME 2 : PROTOCOLES DE TÉLÉCONDUITE (IEC 60870-5, DNP3, MODBUS) (Q13 à Q25)
+Q13. Quelle est la principale différence de transport entre l'IEC 60870-5-101 et l'IEC 60870-5-104 ?
+A) Le 101 est pour le gaz, le 104 pour l'électricité.
+B) Le 101 utilise des liaisons séries asynchrones (RS-232/RS-485), tandis que le 104 encapsule les mêmes données pour utiliser les réseaux TCP/IP (Ethernet, WAN).
+C) Le 104 est analogique.
+D) Le 101 est chiffré, le 104 est en clair.
+Réponse : B - Justification : L'IEC 104 a révolutionné la téléconduite en permettant l'utilisation de routeurs et réseaux IP standards de l'entreprise.
+Q14. Quel est le numéro de port TCP standard utilisé par le protocole IEC 60870-5-104 ?
+A) Port 80.
+B) Port 2404.
+C) Port 20000.
+D) Port 502.
+Réponse : B - Justification : C'est le port assigné par l'IANA pour les communications SCADA IEC 104. Les firewalls industriels doivent autoriser ce port.
+Q15. Le protocole DNP3 (Distributed Network Protocol) a été conçu spécifiquement pour le secteur électrique. Quel est l'un de ses grands avantages par rapport au Modbus ?
+A) Il est plus facile à pirater.
+B) Il supporte nativement l'horodatage des événements à la source, la classification des données, et l'envoi spontané (Report by Exception).
+C) Il ne transmet que de l'audio.
+D) Il utilise moins de fils de cuivre.
+Réponse : B - Justification : DNP3 est extrêmement robuste face aux interruptions de communication, garantissant qu'aucune donnée historique n'est perdue.
+Q16. Dans le protocole DNP3, à quoi correspondent les "Classes" (Class 0, 1, 2, 3) des données ?
+A) La classe énergétique de l'équipement.
+B) La "Classe 0" représente les données statiques (valeurs actuelles). Les "Classes 1, 2, 3" représentent les données d'événements prioritaires générées depuis le dernier polling.
+C) Le niveau de tension (HT, MT, BT).
+D) Les groupes d'utilisateurs.
+Réponse : B - Justification : L'interrogation par classe permet au Maître SCADA de récupérer d'abord les événements critiques avant les lectures de routine.
+Q17. Quel est le problème majeur de cybersécurité du protocole Modbus TCP ou Modbus RTU classique ?
+A) Il ralentit les disques durs.
+B) Il transmet toutes les données et commandes en "texte clair" (Clear Text), sans aucun chiffrement ni authentification, le rendant vulnérable aux injections de commandes.
+C) Il est incompatible avec la fibre optique.
+D) Il consomme trop de bande passante.
+Réponse : B - Justification : C'est pour cela qu'il est impératif d'encapsuler ces vieux protocoles dans des VPN IPsec.
+Q18. En Modbus, que signifie un code de retour "Exception Code" envoyé par l'esclave (RTU) ?
+A) Que le câble est coupé.
+B) C'est une réponse de l'esclave pour dire au Maître qu'il a bien reçu la requête, mais qu'il ne peut pas l'exécuter (ex: registre inexistant, fonction illégale).
+C) Que le poste a explosé.
+D) Que l'esclave est en panne d'alimentation.
+Réponse : B - Justification : L'Exception Code (ex: 01, 02) permet un diagnostic d'erreur logique au niveau applicatif.
+Q19. Quel protocole utilise l'architecture Maître/Esclave où l'Esclave ne peut JAMAIS parler sans avoir été interrogé en premier ?
+A) DNP3.
+B) Modbus (version standard classique).
+C) IEC 60870-5-104.
+D) IEC 61850.
+Réponse : B - Justification : Le Modbus RTU est strictement basé sur le Polling. Un esclave Modbus ne peut pas envoyer d'alarme spontanée.
+Q20. Dans l'IEC 60870-5-104, que signifie l'acronyme ASDU ?
+A) Asynchronous Server Data Unit.
+B) Application Service Data Unit (Unité de données de service d'application, contenant les informations SCADA utiles).
+C) Advanced SCADA Digital Utility.
+D) Analog Signal Distributed Unit.
+Réponse : B - Justification : L'ASDU constitue la charge utile (Payload) de la trame IEC 104, identifiant le type d'information (mesure, commande, etc.).
+Q21. Dans un système de téléconduite, l'Interrogation Générale (General Interrogation - GI) a pour but de :
+A) Tester la connexion Internet.
+B) Récupérer l'état actuel de TOUTES les données d'un RTU lors du démarrage ou de la reconnexion, pour rafraîchir l'IHM du Dispatching qui aurait été "aveugle" pendant la coupure.
+C) Effacer les mémoires du RTU.
+D) Mettre à jour l'horloge.
+Réponse : B - Justification : La GI (Interrogation Globale) permet de resynchroniser la base de données du Maître après une perte de communication.
+Q22. Le protocole ICCP (Inter-Control Center Communications Protocol / TASE.2) est utilisé pour :
+A) Contrôler les relais dans la cour HT.
+B) L'échange de données en temps réel entre deux centres de Dispatching (ex: Dispatching National et Dispatching Régional) sur des réseaux WAN (TCP/IP).
+C) Tester les caméras IP.
+D) Le routage des e-mails d'entreprise.
+Réponse : B - Justification : L'ICCP (IEC 60870-6) est le standard mondial pour faire communiquer des gros serveurs SCADA entre eux.
+Q23. Quelle est la fonction d'un "Front-End Processor" (FEP) dans un centre de contrôle SCADA ?
+A) C'est l'écran de l'opérateur.
+B) C'est un serveur de communication dédié qui décharge le serveur principal MTU en gérant directement l'interrogation (Polling) et les protocoles bas niveau des RTU.
+C) C'est un pare-feu matériel.
+D) C'est le générateur diesel.
+Réponse : B - Justification : Le FEP agit comme un concentrateur de communications, traduisant les multiples protocoles terrain (Modbus, 101, 104) vers le serveur SCADA.
+Q24. La liaison série RS-485 est très utilisée en sous-station car :
+A) Elle est plus rapide que la fibre optique.
+B) Elle permet une communication différentielle (immunisée contre les bruits électriques) et peut lier plusieurs équipements (Multi-drop) sur plus de 1000 mètres, contrairement au RS-232.
+C) Elle transmet de l'énergie.
+D) Elle utilise des câbles coaxiaux d'antennes.
+Réponse : B - Justification : Le RS-485 est le support physique roi pour le Modbus RTU sur le terrain grâce à sa robustesse électromagnétique.
+Q25. Quel est l'avantage du TCP (Transmission Control Protocol) par rapport à UDP dans le transport SCADA (ex: IEC 104) ?
+A) Il est beaucoup plus rapide.
+B) TCP est "orienté connexion" et garantit l'acquittement et la livraison des paquets dans l'ordre, alors qu'UDP n'offre aucune garantie de livraison (utile pour la vidéo, dangereux pour le SCADA).
+C) UDP ne fonctionne qu'en WiFi.
+D) TCP crypte les données.
+Réponse : B - Justification : La fiabilité de la transmission des commandes de disjoncteurs exige l'acquittement (ACK) fourni par la couche TCP.
+
+THÈME 3 : NORME IEC 61850 ET POSTES NUMÉRIQUES (Q26 à Q35)
+Q26. Quel est le but principal de la norme IEC 61850 dans les sous-stations électriques ?
+A) Remplacer le gaz SF6.
+B) Standardiser la modélisation des données et utiliser le réseau Ethernet (LAN) pour la communication complète entre tous les équipements, garantissant "l'Interopérabilité" multiconstructeurs.
+C) Standardiser les tailles de câbles HT.
+D) Assurer la communication sans-fil uniquement.
+Réponse : B - Justification : L'IEC 61850 permet à un relais ABB, Siemens et GE de se comprendre sur un même réseau sans passerelle propriétaire.
+Q27. Qu'est-ce qu'un message GOOSE dans l'environnement IEC 61850 ?
+A) Un protocole antivirus.
+B) Generic Object Oriented Substation Event : un message Ethernet de niveau 2, Multicast et ultra-rapide (< 4ms), remplaçant le câblage de cuivre traditionnel pour l'échange d'ordres critiques entre relais (ex: Déclenchement).
+C) Un outil de test d'humidité.
+D) Une alarme visuelle.
+Réponse : B - Justification : Le GOOSE supprime le besoin de tirer des fils de cuivre pour le 50BF ou les interverrouillages entre cellules.
+Q28. Quelle est la différence entre le "Station Bus" (Bus de Station) et le "Process Bus" (Bus de Processus) ?
+A) Ils utilisent des prises électriques différentes.
+B) Le Station Bus relie les relais (IED) au SCADA. Le Process Bus relie les relais aux équipements primaires dans la cour (capteurs TC/TT numérisés) via des fibres optiques.
+C) Le Process bus est analogique.
+D) Le Station bus transporte le personnel.
+Réponse : B - Justification : Le Process Bus (IEC 61850-9-2) supprime les lourds câbles en cuivre véhiculant 110V et 5A depuis la cour.
+Q29. Qu'est-ce qu'une "Merging Unit" (MU) dans un poste numérique ?
+A) Un boîtier de brassage optique.
+B) Une unité placée dans la cour HT qui acquiert les signaux analogiques des TC/TT classiques, les numérise et les transmet aux relais sous forme de Sampled Values (SV) via la fibre optique.
+C) Un serveur d'impression.
+D) Le routeur principal.
+Réponse : B - Justification : La Merging Unit est le cœur de la technologie Process Bus, convertissant l'analogique en paquets Ethernet.
+Q30. Pour garantir qu'aucun message vital (GOOSE) n'est perdu lors de la rupture d'un câble Ethernet ou d'un switch, l'IEC 61850 recommande les protocoles de redondance PRP ou HSR. Quelle est leur particularité ?
+A) Ils utilisent le Spanning Tree.
+B) Ce sont des protocoles de "Zero recovery time" (Temps de récupération nul). La trame est dupliquée et envoyée simultanément sur deux chemins réseau distincts.
+C) Ils augmentent la tension.
+D) Ils fonctionnent par satellite.
+Réponse : B - Justification : Si un chemin casse, la trame du deuxième chemin arrive quand même à destination sans aucune micro-coupure réseau.
+Q31. Dans l'IEC 61850, qu'est-ce qu'un "Logical Node" (Nœud Logique) ?
+A) Un croisement de câbles.
+B) Une brique logicielle standardisée représentant une fonction électrique précise (ex: PTOC pour la surintensité, XCBR pour le disjoncteur).
+C) L'adresse IP du serveur.
+D) Le point de mise à la terre.
+Réponse : B - Justification : Les nœuds logiques uniformisent le dictionnaire de données, indépendamment de la marque du relais.
+Q32. Qu'est-ce que le protocole MMS (Manufacturing Message Specification) dans la norme 61850 ?
+A) Le protocole des alarmes sonores.
+B) Le protocole TCP/IP utilisé par le Station Bus pour la communication Client-Serveur (Reporting, Lecture/Écriture) entre les IED et le système SCADA local.
+C) Un protocole de téléphonie cellulaire.
+D) Un vieux protocole abandonné.
+Réponse : B - Justification : MMS gère la supervision classique (non temps-critique), contrairement au GOOSE (Layer 2) qui gère les actions ultra-rapides.
+Q33. Un fichier .CID, .ICD ou .SCL dans le monde IEC 61850 correspond à :
+A) Un virus informatique.
+B) Des fichiers de configuration basés sur le langage XML, qui décrivent l'architecture du poste, les relais et les variables, permettant de configurer le système informatiquement.
+C) Un logiciel de dessin industriel.
+D) Une image de la sous-station.
+Réponse : B - Justification : Le SCL (Substation Configuration Language) permet de concevoir numériquement l'ingénierie du poste avant de paramétrer les relais réels.
+Q34. Les "Sampled Values" (SV) générées par la Merging Unit transmettent :
+A) Les adresses MAC des switches.
+B) Les échantillons numérisés du courant et de la tension (ex: 4000 échantillons par seconde) pour que les relais effectuent leurs calculs de protection.
+C) Les alarmes du transformateur.
+D) L'heure du réseau.
+Réponse : B - Justification : Le Process Bus remplace les mesures analogiques continues par un flux ininterrompu de données SV.
+Q35. Lors d'un test IEC 61850, l'ingénieur utilise souvent un logiciel comme IEDScout. Pourquoi ?
+A) Pour tester la résistance de terre.
+B) Parce qu'il n'y a plus de signaux électriques à mesurer avec un multimètre. IEDScout "sniffe" (écoute) le réseau LAN pour lire les messages GOOSE et les variables logicielles.
+C) Pour augmenter la pression du gaz.
+D) Pour réparer les câbles optiques.
+Réponse : B - Justification : Le multimètre de l'ingénieur moderne est un logiciel d'analyse réseau Ethernet.
+
+THÈME 4 : RÉSEAUX INFORMATIQUES ET ROUTAGE (CCNA Couches 1-3) (Q36 à Q48)
+Q36. Le modèle de référence OSI pour les communications réseau comprend combien de couches ?
+A) 4 couches.
+B) 7 couches (Physique, Liaison, Réseau, Transport, Session, Présentation, Application).
+C) 5 couches.
+D) 9 couches.
+Réponse : B - Justification : Le modèle OSI standardise l'interconnexion des systèmes.
+Q37. À quelle couche du modèle OSI opère un Routeur (Router) et quelle est sa fonction principale ?
+A) Couche 1 (Physique) - Amplifie le signal.
+B) Couche 3 (Réseau) - Il interconnecte des réseaux différents en acheminant les paquets en fonction de leurs adresses IP de destination.
+C) Couche 7 (Application) - Héberge des sites web.
+D) Couche 2 (Liaison) - Filtre les MAC.
+Réponse : B - Justification : Le routeur lie différents réseaux (ex: LAN vers WAN), tandis que le switch connecte des équipements sur le même réseau local.
+Q38. Quelle est la différence entre une adresse MAC et une adresse IP ?
+A) Ce sont deux noms pour la même chose.
+B) L'adresse MAC (48 bits) est l'adresse matérielle physique gravée en usine (Couche 2), l'adresse IP (32 bits en IPv4) est l'adresse logique routable (Couche 3).
+C) L'adresse MAC change à chaque démarrage.
+D) L'adresse MAC est utilisée sur Internet, l'IP en local.
+Réponse : B - Justification : L'adresse MAC permet la livraison sur le segment local (LAN), l'adresse IP permet le routage global.
+Q39. L'outil réseau "Ping" utilise quel protocole pour tester la connectivité ?
+A) FTP.
+B) ICMP (Internet Control Message Protocol), via des messages Echo Request et Echo Reply.
+C) HTTP.
+D) DHCP.
+Réponse : B - Justification : C'est l'outil de diagnostic de base de la couche 3 (Réseau).
+Q40. Quel équipement est souvent désigné comme "Passerelle par défaut" (Default Gateway) pour les PC d'un réseau local LAN ?
+A) Le serveur d'impression.
+B) L'interface du Routeur local, vers laquelle le PC envoie tout paquet destiné à une adresse IP extérieure à son propre réseau.
+C) Le Hub.
+D) Le pare-feu Windows.
+Réponse : B - Justification : Sans passerelle par défaut, une machine ne peut communiquer qu'avec les équipements de son propre sous-réseau.
+Q41. À quoi sert le "Masque de Sous-Réseau" (Subnet Mask) configuré sur un RTU ?
+A) À le cacher des hackers.
+B) À déterminer (par une opération ET logique) quelle partie de l'adresse IP représente le "Réseau" et quelle partie identifie "l'Hôte".
+C) À chiffrer les données.
+D) À limiter le voltage Ethernet.
+Réponse : B - Justification : Si l'adresse est 192.168.1.10 et le masque 255.255.255.0, l'équipement sait que son réseau est 192.168.1.0.
+Q42. Laquelle de ces plages d'adresses IP est une adresse IP "Privée" (non routable sur Internet, définie par la RFC 1918) ?
+A) 8.8.8.8
+B) 10.0.0.0 à 10.255.255.255
+C) 198.51.100.1
+D) 203.0.113.5
+Réponse : B - Justification : Les adresses privées (comme 192.168.x.x ou 10.x.x.x) sont réservées pour l'usage interne des entreprises (LAN).
+Q43. Que fait le protocole ARP (Address Resolution Protocol) ?
+A) Il attribue les adresses IP.
+B) Il trouve l'adresse MAC physique correspondant à une adresse IP connue sur le réseau local, permettant l'encapsulation de la trame.
+C) Il filtre les spams.
+D) Il convertit les noms de domaine en IP.
+Réponse : B - Justification : Sans la MAC de destination (trouvée via ARP Broadcast), le Switch ne saurait pas où envoyer la trame locale.
+Q44. Quel connecteur est le standard mondial pour terminer un câble réseau en cuivre à paires torsadées (UTP/STP) ?
+A) Connecteur BNC.
+B) Connecteur RJ-45 (8P8C).
+C) Connecteur SC.
+D) Connecteur DB-9.
+Réponse : B - Justification : Le RJ-45 est la connectique standard de l'Ethernet cuivre industriel.
+Q45. Dans une fibre optique, pourquoi utilise-t-on la fibre "Monomode" (Single-mode) sur les longues distances (lignes THT) plutôt que la "Multimode" ?
+A) Elle est plus facile à réparer.
+B) Son cœur très fin (9 µm) empêche la dispersion modale (rebonds), permettant au signal laser de voyager sur de très longues distances (ex: > 100 km) sans répéteur.
+C) Elle conduit le courant continu.
+D) Elle est moins fragile.
+Réponse : B - Justification : Le multimode (cœur de 50 µm ou 62.5 µm) est limité à courte distance (ex: < 2 km) dans un même bâtiment.
+Q46. Qu'est-ce que l'établissement d'une connexion TCP (3-Way Handshake) ?
+A) Un protocole de sécurité Wi-Fi.
+B) L'échange (SYN, SYN-ACK, ACK) avant toute transmission de données, garantissant que les deux hôtes sont prêts à communiquer de façon fiable.
+C) Un branchement électrique en triphasé.
+D) Une méthode de cryptage.
+Réponse : B - Justification : C'est ce mécanisme qui rend TCP "orienté connexion" et fiable, contrairement à UDP.
+Q47. Sur un routeur Cisco (CCNA), quelle commande permet de visualiser la table de routage active ?
+A) show mac address-table
+B) show ip route
+C) ping route
+D) display routing
+Réponse : B - Justification : Cette commande clé affiche tous les réseaux connus par le routeur (Connectés, Statiques, OSPF, etc.).
+Q48. Quel composant de la couche Transport (Couche 4) identifie l'application destinataire du paquet sur un serveur ?
+A) L'adresse IP.
+B) Le numéro de Port (ex: Port 80, Port 2404).
+C) L'adresse MAC.
+D) Le nom d'hôte.
+Réponse : B - Justification : L'IP amène le paquet à la machine. Le Port amène les données au bon logiciel dans cette machine.
+
+THÈME 5 : COMMUTATION ET VLAN (CCNA Couche 2) (Q49 à Q60)
+Q49. Quelle est la différence fondamentale entre un Switch (Commutateur) et un Hub (Concentrateur) ?
+A) Le Hub est programmable, le Switch non.
+B) Le Switch envoie la trame uniquement au port du destinataire grâce à sa table d'adresses MAC, tandis que le Hub diffuse le signal aveuglément à tous ses ports (générant des collisions).
+C) Le Switch fonctionne en Wi-Fi.
+D) Le Hub est utilisé en fibre optique.
+Réponse : B - Justification : Le Switch crée un domaine de collision distinct par port.
+Q50. En configuration CCNA, pourquoi crée-t-on des VLANs (Virtual LAN) sur les switches d'une sous-station ?
+A) Pour augmenter la tension électrique.
+B) Pour segmenter logiquement le réseau physique (ex: isoler le trafic SCADA du trafic Vidéosurveillance) afin d'améliorer la cybersécurité et de réduire le domaine de diffusion (Broadcast Domain).
+C) Pour changer les adresses MAC.
+D) Pour transformer le Switch en Routeur.
+Réponse : B - Justification : Un VLAN isole les flux, garantissant qu'une tempête réseau d'une caméra IP ne bloquera pas les relais.
+Q51. Qu'est-ce qu'un port configuré en mode "Trunk" sur un Switch Cisco ?
+A) Un port désactivé.
+B) Un lien point-à-point (port trunk) capable de transporter le trafic de plusieurs VLANs simultanément entre deux switches, en ajoutant une étiquette (Tag 802.1Q) aux trames.
+C) Un port dédié à l'imprimante.
+D) Un port relié à une ligne téléphonique.
+Réponse : B - Justification : Sans le marquage 802.1Q du port Trunk, il faudrait tirer un câble physique différent pour chaque VLAN entre les switches.
+Q52. Le protocole STP (Spanning Tree Protocol) activé sur les switches industriels sert à :
+A) Mesurer la température.
+B) Détecter les boucles physiques dans une architecture redondante (ex: anneau) et bloquer logiquement certains ports pour éviter une "tempête de broadcast" (Broadcast storm) mortelle pour le réseau.
+C) Attribuer des adresses IP.
+D) Réduire le ping.
+Réponse : B - Justification : Dans un réseau maillé, une boucle infinie sature les switches en quelques millisecondes. STP (et RSTP) gère la redondance sécurisée.
+Q53. Comment un Switch apprend-il dynamiquement les adresses MAC pour remplir sa table (MAC Address Table) ?
+A) L'administrateur doit toutes les taper manuellement.
+B) En inspectant l'adresse MAC SOURCE des trames entrantes sur chacun de ses ports.
+C) Via une requête au serveur DNS.
+D) Le routeur lui envoie un fichier.
+Réponse : B - Justification : Si l'hôte A envoie un paquet sur le Port 1, le Switch enregistre instantanément "MAC A = Port 1".
+Q54. Sur les switches industriels, qu'est-ce que le "Port Security" (Sécurité des ports) ?
+A) Un cadenas physique sur le port RJ45.
+B) Une configuration limitant le nombre et spécifiant les adresses MAC autorisées à se connecter sur un port. Si un PC pirate se branche, le port se bloque automatiquement (Shutdown).
+C) Un protocole antivirus du switch.
+D) Un testeur de câble.
+Réponse : B - Justification : C'est la ligne de défense principale de la couche 2 contre les intrusions physiques dans le réseau local.
+Q55. Que signifie la technologie PoE (Power over Ethernet) supportée par certains switches ?
+A) Le switch est alimenté par l'ordinateur.
+B) Le switch utilise les fils en cuivre du câble réseau RJ45 pour fournir une alimentation électrique DC (ex: 48V) aux périphériques connectés (caméras IP, téléphones), en plus des données.
+C) Le switch transmet du 220V AC.
+D) La réduction de la puissance consommée.
+Réponse : B - Justification : Évite de devoir tirer des câbles d'alimentation électrique supplémentaires pour les petits périphériques télécom.
+Q56. Quelle commande Cisco CLI affiche la configuration actuellement en cours d'exécution dans la mémoire vive (RAM) du switch ou routeur ?
+A) show saved config
+B) show running-config
+C) display current
+D) view memory
+Réponse : B - Justification : Cette commande affiche toutes les interfaces, VLANs et adresses IP actives. Elle doit être sauvegardée (copy run start) pour survivre au redémarrage.
+Q57. Qu'est-ce que le "VLAN Natif" (Native VLAN) sur un lien Trunk 802.1Q ?
+A) C'est le VLAN réservé à la fibre optique.
+B) C'est le seul VLAN dont le trafic circule sur le lien Trunk SANS aucune étiquette (Untagged). Il doit être identique aux deux extrémités de la liaison.
+C) C'est le VLAN supprimé.
+D) C'est le VLAN 0.
+Réponse : B - Justification : Par défaut, c'est le VLAN 1. Un décalage de configuration du VLAN natif cause des problèmes de routage et de sécurité (VLAN Hopping).
+Q58. Qu'est-ce qu'une adresse de diffusion (Broadcast Address) en couche 2 ?
+A) 192.168.1.1
+B) FF:FF:FF:FF:FF:FF. Une trame envoyée à cette adresse MAC sera inondée (floodée) par le switch sur tous ses ports actifs du même VLAN.
+C) 00:00:00:00:00:00
+D) L'adresse MAC du routeur.
+Réponse : B - Justification : Le Broadcast est utilisé par des protocoles comme ARP pour trouver "qui possède cette adresse IP".
+Q59. Pourquoi utilise-t-on le standard RSTP (Rapid Spanning Tree Protocol - 802.1w) plutôt que le STP classique (802.1d) dans les postes électriques ?
+A) Le RSTP coûte moins cher.
+B) Le RSTP converge (recalcule la route) beaucoup plus rapidement (souvent en < 1 seconde) en cas de rupture de lien, minimisant l'interruption des données critiques SCADA. Le vieux STP pouvait prendre 50 secondes.
+C) Le RSTP transporte de l'audio.
+D) Le RSTP n'a pas de boucles.
+Réponse : B - Justification : Le temps de reprise des réseaux industriels est critique.
+Q60. Sur un switch Cisco, la commande "shutdown" saisie dans le mode de configuration d'une interface sert à :
+A) Éteindre le switch complètement.
+B) Désactiver administrativement l'interface réseau spécifique (le port devient down/down).
+C) Redémarrer l'interface.
+D) Sauvegarder la configuration.
+Réponse : B - Justification : Désactiver les ports inutilisés est une pratique de base en cybersécurité.
+
+THÈME 6 : CYBERSÉCURITÉ INDUSTRIELLE (OT) ET SANS-FIL (Q61 à Q75)
+Q61. En informatique classique (IT), la priorité absolue est la "Confidentialité". Dans les systèmes de téléconduite et SCADA (OT), la priorité absolue de sécurité est :
+A) Le chiffrement des disques durs.
+B) La "Disponibilité" (Availability). Le système SCADA doit continuer à fonctionner 24/7. Une panne de téléconduite peut mener à un blackout électrique majeur.
+C) La protection contre la copie.
+D) L'esthétique de l'IHM.
+Réponse : B - Justification : Le triangle CIA (Confidentialité, Intégrité, Disponibilité) devient AIC dans l'industrie.
+Q62. Dans l'architecture d'un réseau industriel, que signifie le concept "d'Air-Gap" (Isolement physique) ?
+A) Mettre de l'air comprimé dans les câbles.
+B) Garantir qu'il n'existe aucune connexion réseau physique ou logique (ni câble, ni routeur, ni WiFi) entre le réseau corporatif (Internet, Mails) et le réseau critique SCADA (OT).
+C) Cacher l'adresse MAC.
+D) Utiliser de la fibre optique uniquement.
+Réponse : B - Justification : Bien que devenu rare avec la digitalisation, l'Air-Gap est la protection ultime contre la migration des ransomwares de la bureautique vers l'industrie.
+Q63. Quel équipement est placé entre le réseau de la sous-station et le réseau WAN pour filtrer les accès indésirables ?
+A) Un onduleur.
+B) Un Pare-feu Industriel (Firewall). Il inspecte le trafic entrant et sortant et bloque tout ce qui n'est pas explicitement autorisé par les règles d'accès (ACL).
+C) Un serveur DHCP.
+D) Un Hub USB.
+Réponse : B - Justification : Le Firewall empêche les scans de ports, les vers et les accès distants non autorisés de pénétrer le réseau OT.
+Q64. Quelle est l'attaque de type "Man-in-the-Middle" (MitM - L'homme du milieu) dans un réseau de téléconduite ?
+A) Voler les serveurs la nuit.
+B) L'attaquant intercepte secrètement le trafic réseau entre le RTU et le Dispatching. Il peut lire, modifier, et retransmettre les commandes SCADA sans que personne ne s'en aperçoive.
+C) Un câble coupé au milieu de la route.
+D) Un virus qui bloque l'écran.
+Réponse : B - Justification : Si le protocole (comme Modbus) est "en clair", l'attaquant peut envoyer de fausses mesures ("Tout va bien") au Dispatcher tout en donnant l'ordre au RTU d'ouvrir un disjoncteur.
+Q65. Pour sécuriser la communication SCADA traversant un réseau public (Internet ou cellulaire 4G), l'utilisation d'un tunnel VPN (Virtual Private Network) basé sur IPsec est obligatoire. Pourquoi ?
+A) Il augmente la vitesse de connexion.
+B) Il chiffre (crypte) et authentifie mathématiquement de bout en bout l'intégralité du trafic, créant un "tuyau blindé" virtuel à l'intérieur du réseau non sécurisé.
+C) Il change l'adresse MAC.
+D) Il transforme le RTU en serveur web.
+Réponse : B - Justification : Le VPN empêche l'interception et l'altération des données critiques de téléconduite.
+Q66. En cybersécurité sans-fil, pourquoi le protocole WEP (Wired Equivalent Privacy) est-il totalement interdit aujourd'hui ?
+A) Il bloque le WiFi.
+B) Son algorithme de chiffrement est si faible (vecteurs d'initialisation courts) qu'il peut être "craqué" par un pirate en quelques minutes avec des outils gratuits, donnant un accès total au réseau.
+C) Il coûte très cher en licence.
+D) Il ne fonctionne qu'avec des vieux PC.
+Réponse : B - Justification : Le WPA2 (ou WPA3) avec chiffrement AES est le standard minimum acceptable pour un réseau Wi-Fi industriel sécurisé.
+Q67. Quelle est la menace posée par un "Rogue Access Point" (Point d'accès voyou) dans une sous-station ?
+A) Un point d'accès qui consomme trop d'électricité.
+B) C'est un routeur Wi-Fi illégitime branché secrètement par un employé (ou un pirate) sur le réseau filaire sécurisé, ouvrant une porte d'entrée invisible et non protégée vers le réseau interne depuis l'extérieur du bâtiment.
+C) Un point d'accès légal en panne.
+D) Une antenne trop puissante.
+Réponse : B - Justification : Le port security et les scanners WIPS (Wireless Intrusion Prevention Systems) luttent contre ce pont pirate matériel.
+Q68. Quelle négligence humaine est la cause de la plupart des piratages massifs d'équipements OT (Caméras, RTU, Routeurs) connectés au réseau ?
+A) Laisser l'équipement allumé 24h/24.
+B) Le maintien des "Mots de passe par défaut" (ex: admin / 1234) du constructeur. Un attaquant qui identifie la marque trouvera le mot de passe dans le manuel en ligne.
+C) Nettoyer l'équipement avec de l'eau.
+D) Ne pas avoir d'antivirus sur le RTU.
+Réponse : B - Justification : La procédure de "Hardening" (Durcissement) exige de changer immédiatement les mots de passe usine et de désactiver les ports inutiles.
+Q69. Qu'est-ce que le "MAC Spoofing" (Usurpation d'adresse MAC) utilisé par les attaquants en réseau sans-fil ?
+A) Éteindre la carte réseau.
+B) Modifier l'adresse MAC de la carte WiFi du pirate pour qu'elle soit identique à celle d'un appareil autorisé, trompant ainsi le filtrage MAC du routeur/switch.
+C) Chiffrer l'adresse MAC.
+D) Supprimer l'adresse MAC.
+Réponse : B - Justification : Le simple "Filtrage MAC" en Wi-Fi n'est pas une mesure de sécurité, car l'adresse MAC circule en clair dans l'air et est facilement copiable.
+Q70. Un "Déni de Service" (DoS - Denial of Service) sur un réseau SCADA a pour but de :
+A) Voler la base de données.
+B) Inonder le RTU ou le routeur avec des millions de requêtes inutiles pour saturer son processeur et sa carte réseau, le rendant "sourd" et incapable de communiquer l'état du poste au Dispatching.
+C) Couper les câbles électriques.
+D) Faire payer une rançon.
+Réponse : B - Justification : Les attaques DoS ciblent directement la "Disponibilité" (Availability) vitale des systèmes de contrôle industriels.
+Q71. En cybersécurité, que signifie le principe du "Moindre Privilège" (RBAC - Role Based Access Control) appliqué aux serveurs SCADA ?
+A) Que tout le monde a accès à tout.
+B) Que chaque utilisateur ne reçoit QUE les droits informatiques strictement nécessaires à sa fonction. Un opérateur SCADA peut visualiser, mais seul l'Administrateur Télécom peut modifier la configuration réseau.
+C) Que les privilèges sont payants.
+D) Que l'accès est libre la nuit.
+Réponse : B - Justification : Limite les dégâts si le compte de l'opérateur est piraté ou mal utilisé.
+Q72. Que signifie l'architecture de "Défense en Profondeur" (Defense in Depth) ?
+A) Enterrer les serveurs très profondément.
+B) Superposer plusieurs couches de sécurité indépendantes (ex: Antivirus + Firewall + VLAN + VPN + Mots de passe forts) pour qu'une attaque échouant à contourner une couche soit bloquée par la suivante.
+C) Augmenter la longueur des câbles.
+D) N'utiliser qu'un seul gros pare-feu.
+Réponse : B - Justification : Aucun outil de sécurité n'est infaillible. La redondance sécuritaire compense les failles individuelles.
+Q73. Qu'est-ce qu'un système IDS (Intrusion Detection System) dans un réseau OT ?
+A) Un logiciel de dessin.
+B) Un capteur passif qui écoute tout le trafic du réseau SCADA et lève des alertes s'il détecte des anomalies (ex: requêtes Modbus inhabituelles, ou commandes vers une adresse IP inconnue).
+C) Une alarme incendie.
+D) Un antivirus effaçant les fichiers.
+Réponse : B - Justification : L'IDS industriel (ex: capteur Nozomi ou Claroty) modélise le trafic normal de l'usine et sonne dès qu'une déviation survient.
+Q74. Pourquoi l'attaque de "Jamming" (Brouillage) est-elle particulièrement dangereuse pour les réseaux de téléconduite basés sur des liaisons Radio ou Sans-Fil ?
+A) Elle augmente la facture d'électricité.
+B) L'attaquant émet un signal radio puissant sur la même fréquence que le réseau (ex: 2.4 GHz), noyant le signal utile dans le bruit et provoquant une perte de communication instantanée (Déni de service physique).
+C) Elle télécharge des virus.
+D) Elle modifie les mots de passe.
+Réponse : B - Justification : Les systèmes sans-fil industriels sont intrinsèquement vulnérables au brouillage électromagnétique (intentionnel ou non).
+Q75. Dans le cadre de la maintenance des serveurs d'un poste HT, l'introduction de clés USB non contrôlées (par le personnel) est le vecteur majeur pour :
+A) Nettoyer l'ordinateur.
+B) Introduire des Malwares (vers, virus comme Stuxnet) qui contournent le pare-feu du périmètre (Air-Gap) de l'entreprise.
+C) Améliorer la mémoire RAM.
+D) Refroidir les ports.
+Réponse : B - Justification : La majorité des infections "internes" industrielles proviennent de clés USB infectées appartenant aux sous-traitants ou employés.
+
+THÈME 7 : TÉLÉCOMMUNICATIONS HT (CPL ET OPGW) (Q76 à Q85)
+Q76. La technologie CPL (Courants Porteurs en Ligne / Power Line Carrier - PLC) consiste à :
+A) Chauffer le câble HT en hiver.
+B) Utiliser la ligne aérienne Haute Tension elle-même comme support physique pour transporter des signaux de télécommunication haute fréquence (Voix, Téléprotection, SCADA) entre deux postes.
+C) Couper le courant avec un signal.
+D) Allumer l'éclairage public.
+Réponse : B - Justification : Technologie très robuste (la ligne HT est très solide). La haute fréquence (ex: 50 kHz - 500 kHz) chevauche le signal de puissance 50 Hz.
+Q77. Quel est le composant qui permet d'injecter et d'extraire les signaux haute fréquence (CPL) de la ligne THT tout en protégeant l'équipement Télécom du 400 000 Volts ?
+A) Le sectionneur de ligne.
+B) Le Condensateur de Couplage (Coupling Capacitor ou CVT). Il bloque la puissance à 50 Hz mais laisse passer la haute fréquence radio.
+C) Le transformateur de courant (TC).
+D) Le relais différentiel.
+Réponse : B - Justification : Le condensateur a une impédance Z = 1/(C.ω). À 50Hz, l'impédance est énorme. À 300 kHz, l'impédance est très faible.
+Q78. Le Bouchon de Ligne (Line Trap) utilisé avec le système CPL est monté :
+A) Sous terre.
+B) En série sur le câble THT à l'entrée du poste. C'est un circuit bouchon RLC qui empêche les signaux CPL haute fréquence d'entrer et de se perdre dans les équipements du poste.
+C) Sur la batterie du poste.
+D) Sur le fil de garde.
+Réponse : B - Justification : Le Line Trap bloque les hautes fréquences de la télécom pour les obliger à rester sur la ligne vers le poste distant.
+Q79. Le boîtier LMU (Line Matching Unit / Boîte d'accord) installé au pied du condensateur de couplage sert à :
+A) Ajuster la température de l'huile.
+B) Adapter l'impédance du câble coaxial (ex: 75 ohms) de la salle de contrôle à l'impédance caractéristique de la ligne HT (ex: 400 ohms), évitant la réflexion des signaux.
+C) Produire la haute tension.
+D) Mesurer le vent.
+Réponse : B - Justification : L'adaptation d'impédance est vitale pour maximiser le transfert d'énergie du signal CPL.
+Q80. Quel phénomène naturel, amplifié par temps de pluie sur les lignes THT, crée un "Bruit de fond blanc" très perturbateur pour les signaux CPL ?
+A) La pleine lune.
+B) L'Effet Couronne (Corona Noise) : l'ionisation de l'air génère un large spectre de fréquences parasites qui couvre les canaux CPL, abaissant le ratio Signal/Bruit (SNR).
+C) L'effet de serre.
+D) Le vent solaire.
+Réponse : B - Justification : Le bruit couronne impose souvent de configurer le CPL avec une puissance d'émission de 10W à 40W pour surmonter le bruit.
+Q81. Qu'est-ce que l'atténuation dans un canal de communication CPL ou optique ?
+A) L'accélération du signal.
+B) La perte progressive de puissance du signal (exprimée en Décibels - dB) au fur et à mesure qu'il voyage sur de grandes distances, due à la résistance de la ligne et aux pertes rayonnées.
+C) Le changement de couleur du câble.
+D) Un rebond d'écho.
+Réponse : B - Justification : Si l'atténuation totale dépasse la sensibilité du récepteur, le lien tombe.
+Q82. L'OPGW (Optical Ground Wire) posé au sommet des pylônes offre l'avantage massif suivant pour la télécommunication de la société d'électricité :
+A) Il est moins cher que le cuivre.
+B) Il combine la mise à la terre contre la foudre et un média de transport de données (fibres optiques) TOTALEMENT immunisé contre les interférences électromagnétiques (EMI) du réseau THT, offrant une bande passante quasi illimitée.
+C) Il produit de l'énergie.
+D) Il émet des ondes radio.
+Réponse : B - Justification : La fibre optique ne conduit pas l'électricité ; la puissance HT et les courts-circuits n'ont aucun impact sur les données qui y circulent (photons).
+Q83. Lors du raccordement de deux bobines de câble OPGW sur un pylône (Boîte de jonction), la technique d'assemblage des brins de fibre optique la plus performante est :
+A) Le collage avec du scotch.
+B) L'Épissure par Fusion (Fusion Splicing) : l'alignement microscopique des deux cœurs de verre fondus par un arc électrique, garantissant une perte de signal quasi nulle (ex: < 0.05 dB).
+C) L'attache mécanique.
+D) La soudure à l'étain.
+Réponse : B - Justification : Les soudeuses à fibre optique automatiques garantissent la continuité lumineuse de l'infrastructure nationale.
+Q84. Quel équipement le technicien télécom utilise-t-il pour trouver le point de coupure ou analyser les pertes d'une liaison Fibre Optique longue distance ?
+A) Un mégohmmètre 5000V.
+B) Un Réflectomètre Optique Temporel (OTDR - Optical Time Domain Reflectometer) qui envoie une impulsion laser et analyse la lumière rétrodiffusée pour tracer le graphe du câble et donner la distance exacte du défaut.
+C) Un stroboscope.
+D) Une pince réseau.
+Réponse : B - Justification : L'OTDR est l'échomètre indispensable pour certifier et dépanner la couche physique des réseaux optiques.
+Q85. Dans une liaison par Faisceau Hertzien (Micro-ondes) entre deux postes, la contrainte physique majeure d'installation des antennes paraboliques est :
+A) La couleur des paraboles.
+B) L'exigence de "Ligne de vue directe" (Line of Sight - LoS). Aucun obstacle (montagne, bâtiment) ne doit couper la Zone de Fresnel du faisceau radio, sinon le signal est atténué ou bloqué.
+C) La présence de nuages.
+D) Le bruit des oiseaux.
+Réponse : B - Justification : C'est pour cette raison que les antennes hertziennes sont toujours placées en haut de très grands mâts de télécommunication.
+
+THÈME 8 : MULTIPLEXAGE (SDH / PDH) ET TÉLÉPROTECTION (Q86 à Q92)
+Q86. Quel est le rôle d'un Multiplexeur (MUX) SDH/PDH dans un nœud de télécommunications de la Sonelgaz ?
+A) Il convertit le 220V en 48V.
+B) Il combine (entrelace temporellement - TDM) des dizaines de signaux lents d'origines différentes (Voix, série SCADA 9600 bps, RTU, données) pour les transporter simultanément dans un seul flux à très haut débit sur une paire de fibres optiques.
+C) Il crypte les vidéos.
+D) Il filtre les spams.
+Réponse : B - Justification : Le multiplexage optimise l'utilisation du média lointain. À l'arrivée, le Démultiplexeur sépare les canaux pour les restituer.
+Q87. Dans la hiérarchie numérique synchrone (SDH), quel est le débit brut de la trame de base STM-1 (Synchronous Transport Module 1) ?
+A) 2 Mbps.
+B) 155.52 Mbps.
+C) 10 Gbps.
+D) 64 kbps.
+Réponse : B - Justification : STM-1 = 155 Mbps, STM-4 = 622 Mbps. Ces débits industriels massifs construisent les "autoroutes" de l'information de l'entreprise.
+Q88. Dans l'ancien standard PDH européen (utilisé pour les interfaces bas débit), quel est le débit d'un lien (Tributary) E1 ?
+A) 56 kbps.
+B) 2.048 Mbps.
+C) 100 Mbps.
+D) 10 Mbps.
+Réponse : B - Justification : Un lien E1 contient 32 intervalles de temps (Time Slots) de 64 kbps chacun, couramment alloués pour la voix ou les anciens SCADA.
+Q89. Quelle architecture physique est privilégiée pour déployer le réseau de transport SDH d'une compagnie d'électricité afin de garantir sa fiabilité ?
+A) La topologie en Étoile.
+B) La topologie en ANNEAU (Ring Topology). Si la fibre optique est physiquement coupée à un endroit, le flux de données emprunte instantanément l'autre sens de l'anneau (Self-Healing Ring en < 50ms) pour atteindre le poste.
+C) La topologie en Bus.
+D) Le réseau Ad-hoc.
+Réponse : B - Justification : La redondance en anneau est le pilier de la disponibilité absolue (99.999%) des réseaux télécom critiques.
+Q90. En Téléprotection (Distance Relaying), le schéma DTT (Direct Transfer Trip) envoie un ordre direct de déclenchement au poste distant. Quelle est l'exigence critique sur le canal Télécom ?
+A) Qu'il soit chiffré.
+B) Une latence ultra-faible (ex: le signal CPL ou optique doit arriver en moins de 10 à 20 millisecondes) avec une garantie absolue que le signal ne sera ni altéré par le bruit, ni ralenti par des goulets d'étranglement.
+C) Qu'il transmette de la vidéo HD.
+D) Qu'il soit sans-fil.
+Réponse : B - Justification : Un retard télécom de 50ms dans le transfert de l'ordre DTT pourrait entraîner la destruction physique des générateurs à cause du défaut persistant sur la ligne.
+Q91. Un technicien mesure la puissance de réception optique (Rx Power) à l'aide d'un Wattmètre optique. L'unité d'affichage standard dans les télécoms est le :
+A) Kilowatt.
+B) dBm (Décibels par rapport à 1 milliwatt), qui est une échelle logarithmique (ex: un niveau de -20 dBm).
+C) Volts.
+D) Hertz.
+Réponse : B - Justification : L'équipement SDH ou CPL spécifie toujours sa puissance d'émission (Tx) et sa sensibilité de réception (Rx) en dBm.
+Q92. Dans un signal numérique binaire transmis (FSK), si une perturbation électromagnétique "bruit" inverse un 0 en 1, comment le système (ex: DNP3 ou Ethernet) détecte-t-il cette erreur ?
+A) Par le volume du son.
+B) Le paquet inclut un code de détection d'erreur (CRC - Cyclic Redundancy Check) à la fin. Le récepteur recalcule ce CRC et s'il diffère, il rejette la trame et demande sa retransmission.
+C) En lisant le message à voix haute.
+D) En mesurant le poids du fichier.
+Réponse : B - Justification : Le CRC garantit qu'aucune fausse commande d'ouverture de disjoncteur altérée par des parasites n'est exécutée.
+
+THÈME 9 : ÉNERGIE TÉLÉCOM, ONDULEURS (UPS) ET BATTERIES (Q93 à Q100)
+Q93. Les racks Télécoms et les RTU SCADA d'un poste électrique exigent une alimentation électrique de quel type ?
+A) 12V AC.
+B) Une alimentation sécurisée issue d'un banc de batteries (couramment 48V DC dans les Télécoms, ou 110V DC pour le poste complet), garantissant leur maintien en vie (Autonomie) lors d'un effondrement total de la tension AC du réseau.
+C) 380V Triphasé.
+D) Des panneaux solaires isolés.
+Réponse : B - Justification : La "Téléconduite" perd tout son sens si le RTU s'éteint au moment même où le Dispatching a le plus besoin de ses informations (pendant un blackout).
+Q94. L'équipement nommé UPS (Uninterruptible Power Supply / Onduleur) a pour rôle principal :
+A) D'accélérer Internet.
+B) De fournir un courant alternatif (220V AC) parfaitement propre (sans micro-coupures, variations de fréquences, ni pics) aux serveurs informatiques et switches depuis le réseau, et de basculer instantanément sur l'énergie des batteries (en DC, qu'il ondule en AC) en cas de panne secteur.
+C) De refroidir la salle de contrôle.
+D) D'allumer l'éclairage public.
+Réponse : B - Justification : Les alimentations à découpage des serveurs PC ne tolèrent pas les creux de tension, justifiant l'usage de l'UPS.
+Q95. Dans la topologie d'un UPS moderne, que signifie "Online Double Conversion" ?
+A) Il a deux écrans.
+B) La tension AC du réseau est redressée en DC (Chargeur), puis ce DC est "Ondulé" en un AC totalement nouveau, parfait et régulé en fréquence. Les batteries sont constamment en ligne sur le bus DC. Le temps de transfert est ZÉRO.
+C) Il est connecté deux fois à Internet.
+D) Il consomme le double d'électricité.
+Réponse : B - Justification : Contrairement à l'UPS "Off-line" qui nécessite quelques millisecondes pour basculer sur batterie, l'Online protège continuellement et activement la charge.
+Q96. Sur un grand système UPS industriel, le module "Static Bypass Switch" (Commutateur statique de dérivation) intervient si :
+A) L'opérateur appuie dessus.
+B) L'onduleur interne tombe en panne (surchauffe, surcharge grave). Le Static Bypass connecte la charge informatique DIRECTEMENT au réseau brut (mains) en < 4ms pour éviter l'extinction brutale des serveurs.
+C) Les batteries sont pleines.
+D) La température est trop basse.
+Réponse : B - Justification : C'est le "Fail-Safe" de l'UPS. Si son électronique lâche, il garantit que les serveurs SCADA continuent de recevoir du courant (bien que non filtré).
+Q97. Quelle est l'action destructrice du "AC Ripple" (Ondulation résiduelle AC) présente en sortie du chargeur/redresseur DC d'un système de batteries ?
+A) Elle augmente la vitesse du CPU.
+B) Un courant alternatif résiduel important (mal filtré) fait chauffer les éléments de la batterie (dégazage) et détruit prématurément les plaques de plomb internes, ruinant le parc batteries.
+C) Elle charge la batterie plus vite.
+D) Elle améliore le Wi-Fi.
+Réponse : B - Justification : La maintenance préventive exige de contrôler avec un multimètre (mode AC) cette ondulation mortelle pour la chimie DC.
+Q98. Les locaux batteries d'un poste HT (abritant les batteries plomb-acide ouvertes) exigent impérativement des grilles de ventilation haute car :
+A) La pièce sent mauvais.
+B) Lors de la charge d'égalisation, l'électrolyse libère du gaz Hydrogène (H2), extrêmement explosif s'il stagne au plafond et qu'une étincelle (lumière, contacteur) survient.
+C) Les batteries ont besoin d'oxygène.
+D) La poussière doit sortir.
+Réponse : B - Justification : L'aération évite l'atteinte de la Limite Inférieure d'Explosivité (LIE) de l'hydrogène dans ce local critique.
+Q99. Comment l'ingénieur Télécom vérifie-t-il la véritable "Capacité résiduelle" (Santé) du banc de batteries 48V DC assurant l'autonomie des baies SDH et RTU ?
+A) En mesurant sa tension avec un voltmètre à vide.
+B) En exécutant un test de décharge réelle (Discharge test / Capacity test) : on déconnecte le chargeur et on fait débiter la batterie dans une "Load bank" (résistance) contrôlée, en chronométrant le temps mis pour chuter à la tension limite.
+C) En pesant le liquide.
+D) En coupant le secteur du poste pendant une journée.
+Réponse : B - Justification : Un voltmètre à vide ment. Une batterie morte peut afficher 50V mais s'effondrer dès qu'on lui demande 20 Ampères. Seul le banc de décharge révèle les cellules HS.
+Q100. En exploitation de systèmes Télécom HT, à quoi sert le "Contact d'Alarme de Fusion Fusible" (Fuse Blown Alarm / MCB Trip alarm) ramené sur les entrées digitales du RTU ?
+A) À allumer le couloir.
+B) Il avertit immédiatement le Dispatching SCADA si un mini-disjoncteur DC (MCB) protégeant un panneau MUX ou CPL s'ouvre, évitant que la perte de communication de l'équipement ne soit interprétée comme une panne globale.
+C) À mesurer la consommation.
+D) À déclencher les extincteurs.
+Réponse : B - Justification : L'ingénierie Télécom exige que toute défaillance d'alimentation locale de ses propres équipements soit diagnostiquée au centre de contrôle avant qu'une action de dépannage ne soit envoyée.
+Fin du QCM d'Évaluation Spécialité Télécom et Téléconduite HT/THT.
+`;
+
+        const defaultQuestions = parseQCMText(rawQCMData);
+
+        // --- COMPOSANT PRINCIPAL DE L'APPLICATION ---
+        function App() {
+          const [questions, setQuestions] = useState(defaultQuestions);
+          const [screen, setScreen] = useState('home'); // 'home', 'quiz', 'result'
+          const [currentIndex, setCurrentIndex] = useState(0);
+          const [selectedOption, setSelectedOption] = useState(null);
+          const [isValidated, setIsValidated] = useState(false);
+          const [score, setScore] = useState(0);
+          const [toastMessage, setToastMessage] = useState('');
+          const [isDragging, setIsDragging] = useState(false);
+          
+          const fileInputRef = useRef(null);
+
+          // Charger les questions sauvegardées
+          useEffect(() => {
+            const saved = localStorage.getItem('scada_qcm_db');
+            if (saved) {
+              try {
+                const parsed = JSON.parse(saved);
+                if(parsed && parsed.length > 0) {
+                   setQuestions(parsed);
+                }
+              } catch (e) {
+                console.error("Erreur de lecture de la base de données locale");
+              }
+            }
+          }, []);
+
+          const processFile = (file) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              const content = e.target.result;
+              const parsedQuestions = parseQCMText(content);
+              
+              if (parsedQuestions.length > 0) {
+                setQuestions(parsedQuestions);
+                localStorage.setItem('scada_qcm_db', JSON.stringify(parsedQuestions));
+                showToast(`Succès : ${parsedQuestions.length} questions importées !`);
+              } else {
+                showToast("Erreur : Impossible de lire le format du fichier.");
+              }
+            };
+            reader.readAsText(file);
+          };
+
+          const handleFileUpload = (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            processFile(file);
+          };
+
+          const restoreDefaultDatabase = () => {
+            setQuestions(defaultQuestions);
+            localStorage.removeItem('scada_qcm_db');
+            showToast(`Base de données par défaut restaurée (${defaultQuestions.length} questions).`);
+          };
+
+          const onDragOver = (e) => {
+            e.preventDefault();
+            setIsDragging(true);
+          };
+
+          const onDragLeave = (e) => {
+            e.preventDefault();
+            setIsDragging(false);
+          };
+
+          const onDrop = (e) => {
+            e.preventDefault();
+            setIsDragging(false);
+            const files = e.dataTransfer.files;
+            if (files && files.length > 0) {
+              processFile(files[0]);
+            }
+          };
+
+          const showToast = (msg) => {
+            setToastMessage(msg);
+            setTimeout(() => setToastMessage(''), 3000);
+          };
+
+          // --- LOGIQUE DU TEST ---
+          const startTest = () => {
+            setCurrentIndex(0);
+            setScore(0);
+            setSelectedOption(null);
+            setIsValidated(false);
+            setScreen('quiz');
+          };
+
+          const handleValidation = () => {
+            if (!selectedOption) return;
+            setIsValidated(true);
+            if (selectedOption === questions[currentIndex].correctAnswer) {
+              setScore(score + 1);
+            }
+          };
+
+          const handleNext = () => {
+            if (currentIndex + 1 < questions.length) {
+              setCurrentIndex(currentIndex + 1);
+              setSelectedOption(null);
+              setIsValidated(false);
+            } else {
+              setScreen('result');
+            }
+          };
+
+          // --- RENDU DES ÉCRANS ---
+          const renderHome = () => (
+            <div className="flex flex-col items-center justify-center space-y-8 animate-fadeIn mt-10">
+              <div className="text-center space-y-4">
+                <div className="flex justify-center mb-6">
+                  <div className="p-4 bg-indigo-100 rounded-full">
+                    <ShieldAlert className="w-16 h-16 text-indigo-700" />
+                  </div>
+                </div>
+                <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">Plateforme d'Habilitation</h1>
+                <h2 className="text-xl text-indigo-600 font-semibold">Télécom & Téléconduite (SCADA)</h2>
+                <p className="max-w-xl text-gray-500 mx-auto">
+                  Évaluation des compétences techniques sur les réseaux industriels, les protocoles (IEC 61850, DNP3, 104), la fibre optique et la cybersécurité.
+                </p>
+              </div>
+
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 w-full max-w-md space-y-6">
+                <div className="flex items-center justify-between text-sm font-medium text-gray-600 border-b pb-4">
+                  <span className="flex items-center"><BookOpen className="w-4 h-4 mr-2"/> Base de données :</span>
+                  <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full">{questions.length} questions prêtes</span>
+                </div>
+
+                <button 
+                  onClick={startTest}
+                  disabled={questions.length === 0}
+                  className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all shadow-md flex items-center justify-center disabled:opacity-50"
+                >
+                  <Play className="w-5 h-5 mr-2" /> Démarrer l'évaluation
+                </button>
+
+                <div className="pt-4 border-t border-gray-100">
+                  <div className="flex items-center justify-between mb-3">
+                     <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold">Espace Administrateur</p>
+                     <button onClick={restoreDefaultDatabase} title="Restaurer la base par défaut (100 Q)" className="text-gray-400 hover:text-indigo-600 transition-colors">
+                       <Database className="w-4 h-4" />
+                     </button>
+                  </div>
+                  
+                  <div 
+                    onDragOver={onDragOver}
+                    onDragLeave={onDragLeave}
+                    onDrop={onDrop}
+                    onClick={() => fileInputRef.current.click()}
+                    className={`w-full py-6 px-4 border-2 border-dashed rounded-xl transition-all flex flex-col items-center justify-center cursor-pointer ${isDragging ? 'border-indigo-500 bg-indigo-50' : 'border-gray-300 bg-gray-50 hover:bg-gray-100'}`}
+                  >
+                    <Upload className={`w-8 h-8 mb-2 transition-colors ${isDragging ? 'text-indigo-500' : 'text-gray-400'}`} />
+                    <span className="font-medium text-gray-700 text-center text-sm">
+                      {isDragging ? 'Relâchez le fichier ici' : 'Cliquez ou glissez-déposez un nouveau QCM (.txt)'}
+                    </span>
+                    <span className="text-xs text-gray-500 mt-1">Format standardisé uniquement</span>
+                  </div>
+                  <input 
+                    type="file" 
+                    accept=".txt" 
+                    ref={fileInputRef} 
+                    onChange={handleFileUpload} 
+                    className="hidden" 
+                  />
+                </div>
+              </div>
+            </div>
+          );
+
+          const renderQuiz = () => {
+            const q = questions[currentIndex];
+            const progress = ((currentIndex + 1) / questions.length) * 100;
+
+            return (
+              <div className="w-full max-w-3xl mx-auto flex flex-col h-full mt-10 pb-10">
+                {/* Progress Bar */}
+                <div className="mb-6">
+                  <div className="flex justify-between text-sm font-semibold text-gray-500 mb-2">
+                    <span>Question {currentIndex + 1} sur {questions.length}</span>
+                    <span>{Math.round(progress)}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2.5">
+                    <div className="bg-indigo-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${progress}%` }}></div>
+                  </div>
+                </div>
+
+                {/* Question Card */}
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 md:p-8 flex-grow">
+                  <h3 className="text-xl md:text-2xl font-bold text-gray-800 mb-8 leading-snug">
+                    <span className="text-indigo-600 mr-2">Q{q.id}.</span>{q.question}
+                  </h3>
+
+                  <div className="space-y-3">
+                    {q.options.map((opt) => {
+                      let btnClass = "w-full text-left p-4 rounded-xl border-2 transition-all flex items-start ";
+                      
+                      if (!isValidated) {
+                        btnClass += selectedOption === opt.id 
+                          ? "border-indigo-600 bg-indigo-50" 
+                          : "border-gray-200 hover:border-indigo-300 hover:bg-gray-50";
+                      } else {
+                        if (opt.id === q.correctAnswer) {
+                          btnClass += "border-green-500 bg-green-50";
+                        } else if (selectedOption === opt.id && selectedOption !== q.correctAnswer) {
+                          btnClass += "border-red-500 bg-red-50";
+                        } else {
+                          btnClass += "border-gray-200 opacity-50";
+                        }
+                      }
+
+                      return (
+                        <button
+                          key={opt.id}
+                          disabled={isValidated}
+                          onClick={() => setSelectedOption(opt.id)}
+                          className={btnClass}
+                        >
+                          <span className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center mr-4 font-bold text-sm ${
+                            !isValidated && selectedOption === opt.id ? 'bg-indigo-600 text-white' : 
+                            isValidated && opt.id === q.correctAnswer ? 'bg-green-500 text-white' :
+                            isValidated && selectedOption === opt.id ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-600'
+                          }`}>
+                            {opt.id}
+                          </span>
+                          <span className={`mt-1 font-medium ${isValidated && opt.id === q.correctAnswer ? 'text-green-800' : 'text-gray-700'}`}>
+                            {opt.text}
+                          </span>
+                          
+                          {isValidated && opt.id === q.correctAnswer && <CheckCircle className="w-6 h-6 text-green-500 ml-auto flex-shrink-0 mt-1" />}
+                          {isValidated && selectedOption === opt.id && selectedOption !== q.correctAnswer && <XCircle className="w-6 h-6 text-red-500 ml-auto flex-shrink-0 mt-1" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Justification Box */}
+                  {isValidated && (
+                    <div className="mt-8 p-5 bg-blue-50 border border-blue-100 rounded-xl flex items-start animate-fadeIn">
+                      <AlertTriangle className="w-6 h-6 text-blue-600 mr-3 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <h4 className="font-bold text-blue-800 mb-1">Justification Technique</h4>
+                        <p className="text-blue-900 text-sm leading-relaxed">{q.justification}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Action Button */}
+                <div className="mt-6 flex justify-end">
+                  {!isValidated ? (
+                    <button
+                      onClick={handleValidation}
+                      disabled={!selectedOption}
+                      className="py-3 px-8 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50 transition-all"
+                    >
+                      Valider la réponse
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleNext}
+                      className="py-3 px-8 bg-gray-900 hover:bg-black text-white font-bold rounded-xl shadow-md transition-all flex items-center"
+                    >
+                      {currentIndex + 1 < questions.length ? 'Question suivante' : 'Voir les résultats'} <Play className="w-4 h-4 ml-2" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          };
+
+          const renderResult = () => {
+            const percentage = Math.round((score / questions.length) * 100);
+            const passed = percentage >= 75; // Seuil de réussite à 75%
+
+            return (
+              <div className="flex flex-col items-center justify-center space-y-8 animate-fadeIn text-center max-w-lg mx-auto mt-10">
+                <div className={`p-6 rounded-full ${passed ? 'bg-green-100' : 'bg-red-100'}`}>
+                  {passed ? <Award className="w-20 h-20 text-green-600" /> : <XCircle className="w-20 h-20 text-red-600" />}
+                </div>
+                
+                <div>
+                  <h2 className="text-4xl font-extrabold text-gray-900 mb-2">
+                    {passed ? 'Habilitation Accordée' : 'Habilitation Refusée'}
+                  </h2>
+                  <p className="text-gray-500 text-lg">
+                    {passed 
+                      ? 'Félicitations, vous avez démontré une excellente maîtrise des systèmes.' 
+                      : 'Vos résultats sont insuffisants pour valider cette habilitation technique.'}
+                  </p>
+                </div>
+
+                <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 w-full">
+                  <div className="text-6xl font-black mb-2" style={{ color: passed ? '#16a34a' : '#dc2626' }}>
+                    {percentage}%
+                  </div>
+                  <p className="text-gray-600 font-medium">Score final : {score} sur {questions.length}</p>
+                  
+                  <div className="mt-6 pt-6 border-t border-gray-100 flex flex-col space-y-3">
+                    <button 
+                      onClick={startTest}
+                      className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all flex items-center justify-center"
+                    >
+                      <RefreshCw className="w-5 h-5 mr-2" /> Recommencer l'évaluation
+                    </button>
+                    <button 
+                      onClick={() => setScreen('home')}
+                      className="w-full py-3 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl transition-all"
+                    >
+                      Retour à l'accueil
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          };
+
+          return (
+            <div className="p-4 md:p-8 flex items-center justify-center w-full">
+              {/* Toast Notification System */}
+              {toastMessage && (
+                <div className="fixed top-4 right-4 bg-gray-900 text-white px-6 py-3 rounded-xl shadow-2xl z-50 animate-bounce">
+                  {toastMessage}
+                </div>
+              )}
+
+              <div className="w-full h-full max-w-5xl">
+                {screen === 'home' && renderHome()}
+                {screen === 'quiz' && renderQuiz()}
+                {screen === 'result' && renderResult()}
+              </div>
+            </div>
+          );
+        }
+
+        // --- DÉMARRAGE DE L'APPLICATION ---
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
