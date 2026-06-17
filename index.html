@@ -13,13 +13,19 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     
     <!-- Babel (Pour compiler le code JSX directement dans le navigateur) -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+ <!-- Babel (Version fixée pour éviter les bugs) -->
+<script src="https://unpkg.com/@babel/standalone@7.23.6/babel.min.js" data-presets="react,env"></script>
 </head>
 <body class="bg-gray-50 text-gray-900 font-sans min-h-screen">
     
     <div id="root" class="min-h-screen"></div>
 
     <script type="text/babel">
+       
+    /** @jsx React.createElement */
+    /** @jsxFrag React.Fragment */
+    
+    // Le reste de votre code (const { useState } = React; etc...)
         // Importation des outils React
         const { useState, useEffect, useRef } = React;
 
